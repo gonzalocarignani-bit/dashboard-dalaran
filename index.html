@@ -794,6 +794,7 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
               <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);border-bottom:1px solid var(--border);background:var(--bg3)">Pipeline</th>
               <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);border-bottom:1px solid var(--border);background:var(--bg3)">Status</th>
               <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);border-bottom:1px solid var(--border);background:var(--bg3)">Destino</th>
+              <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);border-bottom:1px solid var(--border);background:var(--bg3)">Comprador</th>
             </tr>
           </thead>
           <tbody id="clientModalTickets"></tbody>
@@ -970,8 +971,8 @@ async function loadAllData() {
       sbGet('ventas', { select:'*', order:'id.asc' }),
       sbGet('concepto_map', { select:'*' }),
     ]);
-    SB_TECSPAL    = t;
-    SB_QUIPTEAMS  = q;
+    SB_TECSPAL    = t.filter(r => r.pipeline === 'Quote' || r.pipeline === 'Info Extra');
+    SB_QUIPTEAMS  = q.filter(r => r.pipeline === 'Quote' || r.pipeline === 'Info Extra');
     SB_PARAMETROS = p;
     SB_VENTAS     = v;
     // Build concepto map lookup
@@ -1058,13 +1059,14 @@ function buildData() {
         if (excludedDests.has(destKey)) continue;
       }
       if (currentCountryFilter && r.country_code !== currentCountryFilter) continue;
+      if (currentBuyerFilter && r.buyer !== currentBuyerFilter) continue;
       const mkRaw = r.created_at ? r.created_at.substring(0,7) : null;
       const midx  = mkRaw ? MKEYS.indexOf(mkRaw) : -1;
       const md    = midx >= 0 ? MDISP[midx] : null;
       const st    = r.status || '';
       const cc    = r.country_code || null;
       const bu    = r.buyer || null;
-      const re    = r.region || null;
+      const re    = detectRegion(r) || null;
       const won   = st === 'Negocio Ganado';
       const lost  = st === 'Negocio Perdido';
 
@@ -1217,6 +1219,10 @@ function buildData() {
   ALL_COUNTRIES = Object.keys(CC_LOOKUP).sort();
 }
 
+function detectRegion(r) {
+  return r.region || r.country_region || r.zone || r.area || '';
+}
+
 function normalize(r) {
   return {
     id:          r.task_id,
@@ -1228,7 +1234,7 @@ function normalize(r) {
     destination: r.destination || '',
     countryCode: r.country_code || '',
     country:     CC_LOOKUP[r.country_code]?.country || '',
-    region:      r.region || '',
+    region:      detectRegion(r),
     buyer:       r.buyer || '',
     operaciones: r.operaciones || '',
     am:          r.am || '',
@@ -1327,6 +1333,7 @@ let currentClientMinCoti = 0;
 let currentClientMaxConv = null;
 let currentCountryFilter = null; // country_code filter in Comercial
 let currentRegionFilter = null;
+let currentBuyerFilter = null;
 let combMonth = window._defaultMonth || 'all';
 let procMonth = 'all';
 let procBuyerFilter = null; // buyer name filter in Procurement
@@ -1450,6 +1457,18 @@ function renderEntity(entity, month, topN) {
     <select id="filterPaisSel" style="background:var(--bg4);border:1px solid ${currentCountryFilter?'var(--accent2)':'var(--border)'};color:${currentCountryFilter?'#fff':'var(--muted)'};font-family:'Inter',sans-serif;font-size:11px;font-weight:700;padding:4px 8px;border-radius:7px;cursor:pointer;outline:none">
       <option value="">Todos…</option>
       ${[...new Set((entity==='tecspal'?SB_TECSPAL:SB_QUIPTEAMS).map(r=>r.country_code).filter(Boolean))].sort().map(cc=>`<option value="${cc}" ${currentCountryFilter===cc?'selected':''}>${cc}</option>`).join('')}
+    </select>
+    <div class="filter-sep"></div>
+    <span class="fb-label">Comprador</span>
+    <select id="filterBuyerSel" style="background:var(--bg4);border:1px solid ${currentBuyerFilter?'var(--accent2)':'var(--border)'};color:${currentBuyerFilter?'#fff':'var(--muted)'};font-family:'Inter',sans-serif;font-size:11px;font-weight:700;padding:4px 8px;border-radius:7px;cursor:pointer;outline:none">
+      <option value="">Todos…</option>
+      ${[...new Set((entity==='tecspal'?SB_TECSPAL:SB_QUIPTEAMS).map(r=>r.buyer).filter(Boolean))].sort().map(b=>`<option value="${b}" ${currentBuyerFilter===b?'selected':''}>${b}</option>`).join('')}
+    </select>
+    <div class="filter-sep"></div>
+    <span class="fb-label">Región</span>
+    <select id="filterRegionSel" style="background:var(--bg4);border:1px solid ${currentRegionFilter?'var(--accent2)':'var(--border)'};color:${currentRegionFilter?'#fff':'var(--muted)'};font-family:'Inter',sans-serif;font-size:11px;font-weight:700;padding:4px 8px;border-radius:7px;cursor:pointer;outline:none">
+      <option value="">Todas…</option>
+      ${[...new Set((entity==='tecspal'?SB_TECSPAL:SB_QUIPTEAMS).map(r=>detectRegion(r)).filter(Boolean))].sort().map(rg=>`<option value="${rg}" ${currentRegionFilter===rg?'selected':''}>${rg}</option>`).join('')}
     </select>
     <div class="filter-sep"></div>
     <div class="fb-drop" id="destDropWrap">
@@ -1664,7 +1683,9 @@ function renderEntity(entity, month, topN) {
     const activeMKeysR = month === 'all' ? null : (qMapR[month] || [mKeyMapR[month]].filter(Boolean));
     const ccMapR = {};
     for (const r of raw) {
-      if (r.region !== currentRegionFilter) continue;
+      if (detectRegion(r) !== currentRegionFilter) continue;
+      if (currentBuyerFilter && r.buyer !== currentBuyerFilter) continue;
+      if (currentCountryFilter && r.country_code !== currentCountryFilter) continue;
       const destKey = KNOWN_DESTS.has(r.destination) ? r.destination : '__NONE__';
       if (excludedDests.size > 0 && excludedDests.has(destKey)) continue;
       if (activeMKeysR) {
@@ -1728,7 +1749,9 @@ function renderEntity(entity, month, topN) {
     const activeMKeysB = month === 'all' ? null : (qMapB[month] || [mKeyMapB[month]].filter(Boolean));
     const bMap = {};
     for (const r of raw) {
-      if (r.region !== currentRegionFilter) continue;
+      if (detectRegion(r) !== currentRegionFilter) continue;
+      if (currentBuyerFilter && r.buyer !== currentBuyerFilter) continue;
+      if (currentCountryFilter && r.country_code !== currentCountryFilter) continue;
       const destKey = KNOWN_DESTS.has(r.destination) ? r.destination : '__NONE__';
       if (excludedDests.size > 0 && excludedDests.has(destKey)) continue;
       if (activeMKeysB) {
@@ -1791,6 +1814,23 @@ function renderEntity(entity, month, topN) {
   if (_paisSel) _paisSel.addEventListener('change', e => {
     currentCountryFilter = e.target.value || null;
     buildData();
+    destroyCharts();
+    renderEntity(entity, currentMonth, currentTopN);
+  });
+
+  // Comprador filter
+  const _buyerSel = document.getElementById('filterBuyerSel');
+  if (_buyerSel) _buyerSel.addEventListener('change', e => {
+    currentBuyerFilter = e.target.value || null;
+    buildData();
+    destroyCharts();
+    renderEntity(entity, currentMonth, currentTopN);
+  });
+
+  // Región filter (select)
+  const _regionSel = document.getElementById('filterRegionSel');
+  if (_regionSel) _regionSel.addEventListener('change', e => {
+    currentRegionFilter = e.target.value || null;
     destroyCharts();
     renderEntity(entity, currentMonth, currentTopN);
   });
@@ -1992,14 +2032,16 @@ function _buildTablesHTML(entity, month, topN, clientTopN, clientSort) {
   for (const r of rawT) {
     const destKey = KNOWN_DESTS.has(r.destination) ? r.destination : '__NONE__';
     if (excludedDests.size > 0 && excludedDests.has(destKey)) continue;
-    if (currentRegionFilter && r.region !== currentRegionFilter) continue;
+    if (currentRegionFilter && detectRegion(r) !== currentRegionFilter) continue;
+    if (currentBuyerFilter && r.buyer !== currentBuyerFilter) continue;
+    if (currentCountryFilter && r.country_code !== currentCountryFilter) continue;
     if (activeMKeysC) {
       const mk = r.created_at ? r.created_at.substring(0,7) : '';
       if (!activeMKeysC.includes(mk)) continue;
     }
     const cc = r.country_code || null;
     if (!cc) continue;
-    if (!ccAgg[cc]) ccAgg[cc] = {code:cc, region:r.region||'', buyer:r.buyer||'', coti:0, conv:0};
+    if (!ccAgg[cc]) ccAgg[cc] = {code:cc, region:detectRegion(r)||'', buyer:r.buyer||'', coti:0, conv:0};
     ccAgg[cc].coti++;
     if (r.status === 'Negocio Ganado') ccAgg[cc].conv++;
   }
@@ -2016,7 +2058,9 @@ function _buildTablesHTML(entity, month, topN, clientTopN, clientSort) {
   for (const r of rawT) {
     const dk2 = KNOWN_DESTS.has(r.destination) ? r.destination : '__NONE__';
     if (excludedDests.size > 0 && excludedDests.has(dk2)) continue;
-    if (currentRegionFilter && r.region !== currentRegionFilter) continue;
+    if (currentRegionFilter && detectRegion(r) !== currentRegionFilter) continue;
+    if (currentBuyerFilter && r.buyer !== currentBuyerFilter) continue;
+    if (currentCountryFilter && r.country_code !== currentCountryFilter) continue;
     const cc2 = r.country_code; if (!cc2) continue;
     const mk2 = r.created_at ? r.created_at.substring(0,7) : null; if (!mk2) continue;
     if (!sparkByCC[cc2]) sparkByCC[cc2] = {};
@@ -2061,7 +2105,9 @@ function _buildTablesHTML(entity, month, topN, clientTopN, clientSort) {
   for (const r of rawC) {
     const destKey = KNOWN_DESTS.has(r.destination) ? r.destination : '__NONE__';
     if (excludedDests.size > 0 && excludedDests.has(destKey)) continue;
-    if (currentRegionFilter && r.region !== currentRegionFilter) continue;
+    if (currentRegionFilter && detectRegion(r) !== currentRegionFilter) continue;
+    if (currentBuyerFilter && r.buyer !== currentBuyerFilter) continue;
+    if (currentCountryFilter && r.country_code !== currentCountryFilter) continue;
     if (activeMKeysC) {
       const mk = r.created_at ? r.created_at.substring(0,7) : '';
       if (!activeMKeysC.includes(mk)) continue;
@@ -2210,7 +2256,9 @@ function _refreshClientTable() {
   for (const r of rawC) {
     const destKey = KNOWN_DESTS.has(r.destination) ? r.destination : '__NONE__';
     if (excludedDests.size > 0 && excludedDests.has(destKey)) continue;
-    if (currentRegionFilter && r.region !== currentRegionFilter) continue;
+    if (currentRegionFilter && detectRegion(r) !== currentRegionFilter) continue;
+    if (currentBuyerFilter && r.buyer !== currentBuyerFilter) continue;
+    if (currentCountryFilter && r.country_code !== currentCountryFilter) continue;
     if (activeMK) { const mk = r.created_at?.substring(0,7)||''; if (!activeMK.includes(mk)) continue; }
     const co = extractCompany(r.name); if (!co) continue;
     if (!clientMap[co]) clientMap[co] = {name:co,coti:0,conv:0,lost:0,proc:0,countries:new Set(),entity:r._ent||entity};
@@ -2284,10 +2332,12 @@ function _refreshPaisesTable() {
   for (const r of rawT) {
     const destKey = KNOWN_DESTS.has(r.destination) ? r.destination : '__NONE__';
     if (excludedDests.size > 0 && excludedDests.has(destKey)) continue;
-    if (currentRegionFilter && r.region !== currentRegionFilter) continue;
+    if (currentRegionFilter && detectRegion(r) !== currentRegionFilter) continue;
+    if (currentBuyerFilter && r.buyer !== currentBuyerFilter) continue;
+    if (currentCountryFilter && r.country_code !== currentCountryFilter) continue;
     if (activeMK) { const mk=r.created_at?.substring(0,7)||''; if(!activeMK.includes(mk)) continue; }
     const cc = r.country_code; if (!cc) continue;
-    if (!ccAgg[cc]) ccAgg[cc]={code:cc,region:r.region||'',buyer:r.buyer||'',coti:0,conv:0};
+    if (!ccAgg[cc]) ccAgg[cc]={code:cc,region:detectRegion(r)||'',buyer:r.buyer||'',coti:0,conv:0};
     ccAgg[cc].coti++;
     if (r.status==='Negocio Ganado') ccAgg[cc].conv++;
   }
@@ -2321,7 +2371,9 @@ function _refreshPaisesTable() {
   for (const r of rawT) {
     const dk3 = KNOWN_DESTS.has(r.destination) ? r.destination : '__NONE__';
     if (excludedDests.size > 0 && excludedDests.has(dk3)) continue;
-    if (currentRegionFilter && r.region !== currentRegionFilter) continue;
+    if (currentRegionFilter && detectRegion(r) !== currentRegionFilter) continue;
+    if (currentBuyerFilter && r.buyer !== currentBuyerFilter) continue;
+    if (currentCountryFilter && r.country_code !== currentCountryFilter) continue;
     const cc3 = r.country_code; if (!cc3) continue;
     const mk3 = r.created_at ? r.created_at.substring(0,7) : null; if (!mk3) continue;
     if (!sparkByCC2[cc3]) sparkByCC2[cc3] = {};
@@ -2404,6 +2456,24 @@ function renderCombined() {
       <option value="Q1" ${combMonth==='Q1'?'selected':''}>2026 Q1</option>
       <option value="Q4" ${combMonth==='Q4'?'selected':''}>2025 Q4</option>
       <option value="Q3" ${combMonth==='Q3'?'selected':''}>2025 Q3</option>
+    </select>
+    <div class="filter-sep"></div>
+    <span class="fb-label">País</span>
+    <select id="filterCombPaisSel" style="background:var(--bg4);border:1px solid ${currentCountryFilter?'var(--accent2)':'var(--border)'};color:${currentCountryFilter?'#fff':'var(--muted)'};font-family:'Inter',sans-serif;font-size:11px;font-weight:700;padding:4px 8px;border-radius:7px;cursor:pointer;outline:none">
+      <option value="">Todos…</option>
+      ${[...new Set([...SB_TECSPAL,...SB_QUIPTEAMS].map(r=>r.country_code).filter(Boolean))].sort().map(cc=>`<option value="${cc}" ${currentCountryFilter===cc?'selected':''}>${cc}</option>`).join('')}
+    </select>
+    <div class="filter-sep"></div>
+    <span class="fb-label">Comprador</span>
+    <select id="filterCombBuyerSel" style="background:var(--bg4);border:1px solid ${currentBuyerFilter?'var(--accent2)':'var(--border)'};color:${currentBuyerFilter?'#fff':'var(--muted)'};font-family:'Inter',sans-serif;font-size:11px;font-weight:700;padding:4px 8px;border-radius:7px;cursor:pointer;outline:none">
+      <option value="">Todos…</option>
+      ${[...new Set([...SB_TECSPAL,...SB_QUIPTEAMS].map(r=>r.buyer).filter(Boolean))].sort().map(b=>`<option value="${b}" ${currentBuyerFilter===b?'selected':''}>${b}</option>`).join('')}
+    </select>
+    <div class="filter-sep"></div>
+    <span class="fb-label">Región</span>
+    <select id="filterCombRegionSel" style="background:var(--bg4);border:1px solid ${currentRegionFilter?'var(--accent2)':'var(--border)'};color:${currentRegionFilter?'#fff':'var(--muted)'};font-family:'Inter',sans-serif;font-size:11px;font-weight:700;padding:4px 8px;border-radius:7px;cursor:pointer;outline:none">
+      <option value="">Todas…</option>
+      ${[...new Set([...SB_TECSPAL,...SB_QUIPTEAMS].map(r=>detectRegion(r)).filter(Boolean))].sort().map(rg=>`<option value="${rg}" ${currentRegionFilter===rg?'selected':''}>${rg}</option>`).join('')}
     </select>
     <div class="filter-sep"></div>
     <div class="fb-drop" id="destDropWrap">
@@ -2577,6 +2647,25 @@ function renderCombined() {
     combMonth = e.target.value;
     destroyCharts(); renderCombined();
   });
+  // País filter (combined)
+  const _combPaisSel = document.getElementById('filterCombPaisSel');
+  if (_combPaisSel) _combPaisSel.addEventListener('change', e => {
+    currentCountryFilter = e.target.value || null;
+    buildData(); destroyCharts(); renderCombined();
+  });
+  // Comprador filter (combined)
+  const _combBuyerSel = document.getElementById('filterCombBuyerSel');
+  if (_combBuyerSel) _combBuyerSel.addEventListener('change', e => {
+    currentBuyerFilter = e.target.value || null;
+    buildData(); destroyCharts(); renderCombined();
+  });
+  // Región filter (combined)
+  const _combRegionSel = document.getElementById('filterCombRegionSel');
+  if (_combRegionSel) _combRegionSel.addEventListener('change', e => {
+    currentRegionFilter = e.target.value || null;
+    destroyCharts(); renderCombined();
+  });
+
   const _combQSel = document.getElementById('filterCombQSel');
   if (_combQSel) _combQSel.addEventListener('change', e => {
     if (!e.target.value) return;
@@ -2772,6 +2861,7 @@ function openClientModal(client, _unused, entity) {
           <td style="padding:10px 12px;font-size:11px;color:var(--muted)">${r.pipeline||'—'}</td>
           <td style="padding:10px 12px"><span class="pill ${statusClass}">${r.status||'—'}</span></td>
           <td style="padding:10px 12px;font-size:11px;color:var(--muted)">${r.destination||'—'}</td>
+          <td style="padding:10px 12px"><span class="buyer-badge">${r.buyer||'—'}</span></td>
         </tr>`;
       }).join('');
     }
@@ -3482,6 +3572,7 @@ function renderCmGanados(code, entity) {
           <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);border-bottom:1px solid var(--border);width:120px">Status</th>
           <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);border-bottom:1px solid var(--border);width:130px">Pipeline</th>
           <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);border-bottom:1px solid var(--border);width:90px">Destino</th>
+          <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);border-bottom:1px solid var(--border);width:90px">Comprador</th>
         </tr>
       </thead>
       <tbody>
@@ -3494,6 +3585,7 @@ function renderCmGanados(code, entity) {
             <td style="padding:10px 12px;white-space:nowrap"><span class="pill ${r.status==='Negocio Ganado'?'pill-ganado':r.status==='Negocio Perdido'?'pill-perdido':'pill-proceso'}">${r.status||'—'}</span></td>
             <td style="padding:10px 12px;font-size:11px;color:var(--muted);white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis">${r.pipeline||'—'}</td>
             <td style="padding:10px 12px;font-size:11px;color:var(--muted);white-space:nowrap">${r.destination||'—'}</td>
+            <td style="padding:10px 12px"><span class="buyer-badge">${r.buyer||'—'}</span></td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -3785,13 +3877,24 @@ function renderEquipos() {
       e.maxPrice = prices.length ? Math.max(...prices) : 0;
       e.spread   = e.maxPrice - e.minPrice;
       e.topCC    = Object.entries(e.countries).sort((a,b)=>b[1]-a[1])[0]?.[0] || '—';
+      const countryCtx = eqCC || e.topCC;
       const supMap = {};
       e.txns.forEach(t => {
         if (!t.razon_social_proveedor || t.unitPrice<=0) return;
+        if (countryCtx && countryCtx !== '—' && t.pais && t.pais !== countryCtx) return;
         if (!supMap[t.razon_social_proveedor]) supMap[t.razon_social_proveedor]=[];
         supMap[t.razon_social_proveedor].push(t.unitPrice);
       });
-      const supAvg = Object.entries(supMap).map(([s,ps])=>({s,avg:ps.reduce((a,b)=>a+b,0)/ps.length})).sort((a,b)=>a.avg-b.avg);
+      let supAvg = Object.entries(supMap).map(([s,ps])=>({s,avg:ps.reduce((a,b)=>a+b,0)/ps.length})).sort((a,b)=>a.avg-b.avg);
+      if (!supAvg.length) {
+        const supMapAll = {};
+        e.txns.forEach(t => {
+          if (!t.razon_social_proveedor || t.unitPrice<=0) return;
+          if (!supMapAll[t.razon_social_proveedor]) supMapAll[t.razon_social_proveedor]=[];
+          supMapAll[t.razon_social_proveedor].push(t.unitPrice);
+        });
+        supAvg = Object.entries(supMapAll).map(([s,ps])=>({s,avg:ps.reduce((a,b)=>a+b,0)/ps.length})).sort((a,b)=>a.avg-b.avg);
+      }
       e.cheapestSup = supAvg[0]?.s||'—';
     });
     return Object.values(map).sort((a,b)=>b.units-a.units);
